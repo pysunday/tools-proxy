@@ -1,0 +1,12 @@
+{
+  "name": "proxy",
+  "type": "tools",
+  "version": "1.0.0",
+  "description": "代理辅助工具",
+  "bin": ["sd_proxy"],
+  "keywords": [
+    "sunday",
+    "tools"
+  ],
+  "author": "ct"
+}
