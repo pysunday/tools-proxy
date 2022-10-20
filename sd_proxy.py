@@ -80,7 +80,7 @@ class Playback:
         url = grenPath(urlInfo)
         collectPath = self.getCollectPath(url)
         # logger.warning('链接: ' + url)
-        if url in self.closeList:
+        if url in self.closeList or url.split('.').pop() in ['png', 'gif']:
             logger.warning('拦截: ' + url)
             flow.response = http.Response.make(200, str.encode('sunday proxy'))
         elif collectPath:
@@ -95,30 +95,48 @@ class Playback:
                 filepath = filepath1
             elif path.exists(filepath2) and path.isfile(filepath2):
                 filepath = filepath2
-            if filepath:
-                logger.warning('本地: ' + filepath)
-                with open(filepath, 'r') as f:
-                    content = f.read()
-                    flow.response = http.Response.make(200, str.encode(content), { "sunday_flag": "7758" })
-            elif url in self.proxyList:
-                logger.warning('代理: ' + filepath)
+            if url in self.proxyList:
+                logger.warning('代理: ' + url)
                 data = flow.request.data.content
                 headers = dict(flow.request.headers)
                 targeturl = flow.request.url
                 res = getattr(self.fetch, flow.request.method.lower())(targeturl, data=data, headers=headers)
                 flow.response = http.Response.make(res.status_code, res.content, { **dict(res.headers), "sunday_flag": "7758" })
+            elif filepath:
+                logger.warning('本地: ' + filepath)
+                with open(filepath, 'r') as f:
+                    content = f.read()
+                    flow.response = http.Response.make(200, str.encode(content), { "sunday_flag": "7758" })
 
 class Proxy():
-    def __init__(self, name=None, host=None, port=None, collectList=None, closeList=None, proxyList=None):
+    def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, **kwargs):
         self.name = name
         self.host = host
-        self.port = port
-        self.collectList = collectList
-        self.closeList = closeList
-        self.proxyList = proxyList
+        self.port = int(port)
+        self.collectList = collectList or []
+        self.closeList = closeList or []
+        self.proxyList = proxyList or []
         self.configFile = None
-        self.dataPath = None
+        self.dataPath = dataPath
         self.runpath = path.realpath(path.curdir)
+
+    def addCloseUrl(self, url):
+        if type(url) == str: url = [url]
+        if type(url) != list: return
+        logger.debug('add close url %s' % url)
+        self.closeList.extend(list(filter(lambda item: item not in self.closeList, url)))
+
+    def addProxyUrl(self, url):
+        if type(url) == str: url = [url]
+        if type(url) != list: return
+        logger.debug('add proxy url %s' % url)
+        self.proxyList.extend(list(filter(lambda item: item not in self.proxyList, url)))
+
+    def addCollectUrl(self, url):
+        if type(url) == str: url = [url]
+        if type(url) != list: return
+        logger.debug('add collect url %s' % url)
+        self.collectList.extend(list(filter(lambda item: item not in self.collectList, url)))
 
     def init(self):
         if self.configFile:
