@@ -149,7 +149,7 @@ class Proxy():
             except Exception as e:
                 raise SundayException(-1, '配置文件解析失败，请检查文件%s内容是否为JSON格式' % self.configFile.name)
 
-    async def run(self):
+    def run(self):
         self.init()
         logger.info('捕获处理的链接有: %s' % self.collectList)
         logger.info('拦截处理的链接有: %s' % self.closeList)
@@ -166,7 +166,10 @@ class Proxy():
         master.addons.add(
             Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList),
             )
-        await master.run()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(master.run())
+        loop.close()
+        # asyncio.run(master.run())
 
 
 def runcmd():
