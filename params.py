@@ -18,7 +18,7 @@ CMDINFO = {
                     'collectList配置收集与回放的链接，不配置则为所有符合'),
                 'nargs': 1,
                 'type': argparse.FileType('r'),
-                'required': True
+                # 'required': True
             },
             {
                 'name': ['-n', '--name'],

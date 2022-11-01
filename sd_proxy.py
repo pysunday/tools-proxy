@@ -1,12 +1,13 @@
 #!/bin/env python
 import asyncio
 import json
+import gzip
 from sunday.core import Logger, Fetch, getException, getParser
 from os import path, makedirs
 from mitmproxy import options, http
 from mitmproxy.tools import dump
 from urllib.parse import urlparse, unquote
-from pydash import omit
+from pydash import omit, get
 from sunday.tools.proxy.params import CMDINFO
 
 SundayException = getException()
@@ -37,8 +38,8 @@ class Collect:
     def parseData(self, urlInfo, flow):
         url = grenPath(urlInfo)
         logger.warning('处理链接%s' % url)
-        filecwd = self.dataPath + url
-        if path.exists(filecwd): return
+        filecwd = path.join(self.dataPath, url)
+        # if path.exists(filecwd): return
         filedir = path.dirname(filecwd)
         if not path.exists(filedir): makedirs(filedir)
         with open(filecwd, 'w+') as f:
@@ -67,6 +68,7 @@ class Playback:
         self.collectList = collectList
         self.closeList = closeList
         self.proxyList = proxyList
+        self.headerList = ['Content-Type', 'Content-Encoding', 'Cache-Control']
 
     def getCollectPath(self, url):
         if len(self.collectList) == 0 or url in self.collectList: return url
@@ -91,6 +93,7 @@ class Playback:
             collectPathSplit[-1] = '.'.join(temp)
             filepath1 = path.join(self.dataPath, *collectPathSplit)
             filepath2 = path.join(self.dataPath, collectPath)
+            filepath_info = filepath2 + '.info'
             if path.exists(filepath1) and path.isfile(filepath1):
                 filepath = filepath1
             elif path.exists(filepath2) and path.isfile(filepath2):
@@ -104,9 +107,13 @@ class Playback:
                 flow.response = http.Response.make(res.status_code, res.content, { **dict(res.headers), "sunday_flag": "7758" })
             elif filepath:
                 logger.warning('本地: ' + filepath)
-                with open(filepath, 'r') as f:
-                    content = f.read()
-                    flow.response = http.Response.make(200, str.encode(content), { "sunday_flag": "7758" })
+                with open(filepath, 'r') as ff, open(filepath_info, 'r') as fi:
+                    content = bytes(ff.read(), 'utf-8')
+                    info = json.load(fi)
+                    fields = {key: val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                    flow.response = http.Response.make(200, content, { "sunday_flag": "proxy", **fields })
+                    # if 'gzip' in fields['Content-Encoding']:
+                    #     flow.response.encode('gzip')
 
 class Proxy():
     def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, **kwargs):
@@ -149,7 +156,7 @@ class Proxy():
             except Exception as e:
                 raise SundayException(-1, '配置文件解析失败，请检查文件%s内容是否为JSON格式' % self.configFile.name)
 
-    def run(self):
+    async def run(self):
         self.init()
         logger.info('捕获处理的链接有: %s' % self.collectList)
         logger.info('拦截处理的链接有: %s' % self.closeList)
@@ -166,10 +173,7 @@ class Proxy():
         master.addons.add(
             Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList),
             )
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(master.run())
-        loop.close()
-        # asyncio.run(master.run())
+        await master.run()
 
 
 def runcmd():
