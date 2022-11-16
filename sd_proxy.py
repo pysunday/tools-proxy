@@ -3,12 +3,15 @@ import asyncio
 import json
 import gzip
 from sunday.core import Logger, Fetch, getException, getParser
-from os import path, makedirs
+from sunday.utils import currentTimestamp
+from os import path, makedirs, listdir
 from mitmproxy import options, http
 from mitmproxy.tools import dump
 from urllib.parse import urlparse, unquote
 from pydash import omit, get
 from sunday.tools.proxy.params import CMDINFO
+from datetime import datetime
+from shutil import copyfile
 
 SundayException = getException()
 
@@ -39,26 +42,32 @@ class Collect:
         url = grenPath(urlInfo)
         logger.warning('处理链接%s' % url)
         filecwd = path.join(self.dataPath, url)
-        # if path.exists(filecwd): return
-        filedir = path.dirname(filecwd)
-        if not path.exists(filedir): makedirs(filedir)
-        with open(filecwd, 'w+') as f:
-            f.write(flow.response.content.decode('utf-8'))
-        with open(filecwd + '.info', 'w+') as f:
-            info = {
-                    'url': url,
-                    'url_full': unquote(flow.request.url),
-                    'request': flow.request.data.__dict__,
-                    'response': omit(flow.response.data.__dict__, ['content']),
-                    }
-            f.write(json.dumps(info, indent=4, cls=BytesEncoder))
+        # info/main/format
+        filecwdInfo = path.join(filecwd, 'info')
+        filecwdMain = path.join(filecwd, 'info')
+        filecwdCurr = path.join(filecwd, datetime.today().isoformat())
+        if not path.exists(filecwd): makedirs(filecwd)
+        with open(filecwdCurr, 'w+') as currf, open(filecwdMain) as mainf:
+            content = flow.response.content.decode('utf-8')
+            currf.write(content)
+            mainf.write(content)
+        if not path.exists(filecwdInfo):
+            with open(filecwdInfo, 'w+') as f:
+                info = {
+                        'url': url,
+                        'url_full': unquote(flow.request.url),
+                        'request': flow.request.data.__dict__,
+                        'response': omit(flow.response.data.__dict__, ['content']),
+                        }
+                f.write(json.dumps(info, indent=4, cls=BytesEncoder))
         logger.info('文件写入成功!')
 
     def response(self, flow):
         urlInfo = urlparse(flow.request.url)
-        url = grenPath(urlInfo)
-        if len(self.collectList) == 0 or url in self.collectList:
-            self.parseData(urlInfo, flow)
+        if urlInfo.netloc: 
+            url = grenPath(urlInfo)
+            if len(self.collectList) == 0 or url in self.collectList:
+                self.parseData(urlInfo, flow)
 
 class Playback:
     def __init__(self, dataPath, collectList, closeList, proxyList):
@@ -87,17 +96,32 @@ class Playback:
             flow.response = http.Response.make(200, str.encode('sunday proxy'))
         elif collectPath:
             filepath = ''
-            collectPathSplit = collectPath.split('/')
-            temp = collectPathSplit[-1].split('.')
-            temp[-1] = 'format.' + temp[-1]
-            collectPathSplit[-1] = '.'.join(temp)
-            filepath1 = path.join(self.dataPath, *collectPathSplit)
-            filepath2 = path.join(self.dataPath, collectPath)
-            filepath_info = filepath2 + '.info'
-            if path.exists(filepath1) and path.isfile(filepath1):
-                filepath = filepath1
-            elif path.exists(filepath2) and path.isfile(filepath2):
-                filepath = filepath2
+            filepath_tmp = path.join(self.dataPath, collectPath)
+            if path.isdir(filepath_tmp):
+                filepath_format = path.join(filepath_tmp, 'format')
+                filepath_main = path.join(filepath_tmp, 'main')
+                filepath_info = path.join(filepath_tmp, 'info')
+            else:
+                collectPathSplit = collectPath.split('/')
+                temp = collectPathSplit[-1].split('.')
+                temp[-1] = 'format.' + temp[-1]
+                collectPathSplit[-1] = '.'.join(temp)
+                filepath_format = path.join(self.dataPath, *collectPathSplit)
+                filepath_main = filepath_tmp
+                filepath_info = filepath_tmp + '.info'
+            if path.exists(filepath_format) and path.isfile(filepath_format):
+                filepath = filepath_format
+            elif path.exists(filepath_main) and path.isfile(filepath_main):
+                filepath = filepath_main
+            elif path.exists(filepath_info) and path.isdir(filepath_tmp):
+                for name in listdir(filepath_tmp):
+                    try:
+                        datetime.fromisoformat(name)
+                        filepath = path.join(filepath_tmp, name)
+                        copyfile(filepath, filepath_main)
+                        break
+                    except Exception as e:
+                        pass
             if url in self.proxyList:
                 logger.warning('代理: ' + url)
                 data = flow.request.data.content
@@ -109,11 +133,12 @@ class Playback:
                 logger.warning('本地: ' + filepath)
                 with open(filepath, 'r') as ff, open(filepath_info, 'r') as fi:
                     content = bytes(ff.read(), 'utf-8')
-                    info = json.load(fi)
-                    fields = {key: val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
-                    flow.response = http.Response.make(200, content, { "sunday_flag": "proxy", **fields })
-                    # if 'gzip' in fields['Content-Encoding']:
-                    #     flow.response.encode('gzip')
+                    if content:
+                        info = json.load(fi)
+                        fields = {key: val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                        flow.response = http.Response.make(200, content, { "sunday_flag": "proxy", **fields })
+                        # if 'gzip' in fields['Content-Encoding']:
+                        #     flow.response.encode('gzip')
 
 class Proxy():
     def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, **kwargs):
