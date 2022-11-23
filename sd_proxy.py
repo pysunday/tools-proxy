@@ -4,7 +4,7 @@ import json
 import gzip
 from sunday.core import Logger, Fetch, getException, getParser
 from sunday.utils import currentTimestamp
-from os import path, makedirs, listdir
+from os import path, makedirs, listdir, mknod
 from mitmproxy import options, http
 from mitmproxy.tools import dump
 from urllib.parse import urlparse, unquote
@@ -31,35 +31,64 @@ def grenPath(urlInfo):
     return url
 
 class Collect:
-    def __init__(self, dataPath, collectList, closeList, proxyList):
+    def __init__(self, dataPath, collectList, closeList, proxyList, superkey):
         logger.info(f'采集接口 => {dataPath}')
         self.dataPath = dataPath
         self.collectList = collectList
         self.closeList = closeList
         self.proxyList = proxyList
+        self.superkey = superkey
 
     def parseData(self, urlInfo, flow):
         url = grenPath(urlInfo)
         logger.warning('处理链接%s' % url)
         filecwd = path.join(self.dataPath, url)
         # info/main/format
+        nowtime = datetime.today().isoformat()
         filecwdInfo = path.join(filecwd, 'info')
-        filecwdMain = path.join(filecwd, 'info')
-        filecwdCurr = path.join(filecwd, datetime.today().isoformat())
+        filecwdMain = path.join(filecwd, 'main')
+        filecwdCurr = path.join(filecwd, nowtime)
+        filecwdCurrInfo = f"{filecwdCurr}.info"
         if not path.exists(filecwd): makedirs(filecwd)
-        with open(filecwdCurr, 'w+') as currf, open(filecwdMain) as mainf:
+        with open(filecwdCurr, 'w+') as currf, open(filecwdMain, 'w+') as mainf, open(filecwdCurrInfo, 'w+') as infof:
             content = flow.response.content.decode('utf-8')
             currf.write(content)
             mainf.write(content)
+            params = dict(flow.request.query)
+            try:
+                if flow.request.text: params.update(flow.request.json())
+            except Exception as e:
+                logger.exception(e)
+            if url in self.superkey:
+                # 根据入参做文件映射
+                superkeyCfg = path.join(filecwd, 'config')
+                skeys = self.superkey.get(url, [])
+                key = '@@'.join([params[skey] for skey in skeys if type(params.get(skey)) == str])
+                obj = None
+                if not path.exists(superkeyCfg): open(superkeyCfg, 'a').close()
+                with open(superkeyCfg, 'r+') as superf:
+                    text = superf.read()
+                    if text:
+                        obj = json.loads(text)
+                        if key not in obj:
+                            obj[key] = nowtime
+                        else:
+                            obj = None
+                    else:
+                        obj = { key: nowtime }
+                if obj:
+                    with open(superkeyCfg, 'w+') as superf:
+                        superf.write(json.dumps(obj, indent=4))
+            info = {
+                    'url': url,
+                    'url_full': unquote(flow.request.url),
+                    'params': params,
+                    'request': flow.request.data.__dict__,
+                    'response': omit(flow.response.data.__dict__, ['content']),
+                    }
+            infof.write(json.dumps(info, indent=4, cls=BytesEncoder))
         if not path.exists(filecwdInfo):
-            with open(filecwdInfo, 'w+') as f:
-                info = {
-                        'url': url,
-                        'url_full': unquote(flow.request.url),
-                        'request': flow.request.data.__dict__,
-                        'response': omit(flow.response.data.__dict__, ['content']),
-                        }
-                f.write(json.dumps(info, indent=4, cls=BytesEncoder))
+            copyfile(filecwdCurrInfo, filecwdInfo)
         logger.info('文件写入成功!')
 
     def response(self, flow):
@@ -70,13 +99,14 @@ class Collect:
                 self.parseData(urlInfo, flow)
 
 class Playback:
-    def __init__(self, dataPath, collectList, closeList, proxyList):
+    def __init__(self, dataPath, collectList, closeList, proxyList, superkey):
         logger.info(f'回放接口 => {dataPath}')
         self.fetch = Fetch()
         self.dataPath = dataPath
         self.collectList = collectList
         self.closeList = closeList
         self.proxyList = proxyList
+        self.superkey = superkey
         self.headerList = ['Content-Type', 'Content-Encoding', 'Cache-Control']
 
     def getCollectPath(self, url):
@@ -109,7 +139,25 @@ class Playback:
                 filepath_format = path.join(self.dataPath, *collectPathSplit)
                 filepath_main = filepath_tmp
                 filepath_info = filepath_tmp + '.info'
-            if path.exists(filepath_format) and path.isfile(filepath_format):
+            superkeyCfg = path.join(filepath_tmp, 'config')
+            if url in self.superkey and path.exists(superkeyCfg):
+                # 根据入参做文件映射
+                skeys = self.superkey.get(url, [])
+                params = dict(flow.request.query)
+                try:
+                    if flow.request.text: params.update(flow.request.json())
+                except Exception as e:
+                    logger.exception(e)
+                key = '@@'.join([params[skey] for skey in skeys if type(params.get(skey)) == str])
+                with open(superkeyCfg, 'r+') as superf:
+                    text = superf.read()
+                    if text:
+                        obj = json.loads(text)
+                        if key in obj:
+                            filepath = path.join(filepath_tmp, obj[key])
+            if filepath:
+                pass
+            elif path.exists(filepath_format) and path.isfile(filepath_format):
                 filepath = filepath_format
             elif path.exists(filepath_main) and path.isfile(filepath_main):
                 filepath = filepath_main
@@ -141,13 +189,14 @@ class Playback:
                         #     flow.response.encode('gzip')
 
 class Proxy():
-    def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, **kwargs):
+    def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, superkey=None, **kwargs):
         self.name = name
         self.host = host
         self.port = int(port)
         self.collectList = collectList or []
         self.closeList = closeList or []
         self.proxyList = proxyList or []
+        self.superkey = superkey or {}
         self.configFile = None
         self.dataPath = dataPath
         self.runpath = path.realpath(path.curdir)
@@ -178,6 +227,7 @@ class Proxy():
                 self.collectList = configObj.get('collectList', [])
                 self.proxyList = configObj.get('proxyList', [])
                 self.closeList = configObj.get('closeList', [])
+                self.superkey = configObj.get('superkey', {})
             except Exception as e:
                 raise SundayException(-1, '配置文件解析失败，请检查文件%s内容是否为JSON格式' % self.configFile.name)
 
@@ -186,6 +236,7 @@ class Proxy():
         logger.info('捕获处理的链接有: %s' % self.collectList)
         logger.info('拦截处理的链接有: %s' % self.closeList)
         logger.info('代理处理的链接有: %s' % self.proxyList)
+        logger.info('接口入参强化配置: %s' % self.superkey)
         opts = options.Options(listen_host=self.host, listen_port=self.port)
         master = dump.DumpMaster(
             opts,
@@ -196,7 +247,7 @@ class Proxy():
             raise SundayException(-1, '传入name值不正确，请检查')
         Addon = Collect if self.name == 'collect' else Playback
         master.addons.add(
-            Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList),
+            Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList, self.superkey),
             )
         await master.run()
 

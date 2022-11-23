@@ -15,7 +15,8 @@ CMDINFO = {
                 'metavar': 'FILE',
                 'help': ('需要处理链接的json配置文件, closeList配置的链接请求会被中止，'
                     'proxyList配置的链接将通过sunday fetch重新发起请求并返回结果，'
-                    'collectList配置收集与回放的链接，不配置则为所有符合'),
+                    'collectList配置收集与回放的链接，不配置则为所有符合'
+                    'superkey配置根据调用的入参返回对应的数据，superkey: {url: [key1, key2]}'),
                 'nargs': 1,
                 'type': argparse.FileType('r'),
                 # 'required': True
