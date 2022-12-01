@@ -2,8 +2,10 @@
 import asyncio
 import json
 import gzip
+import re
+import chardet
 from sunday.core import Logger, Fetch, getException, getParser
-from sunday.utils import currentTimestamp
+from sunday.utils import currentTimestamp, mergeObj
 from os import path, makedirs, listdir, mknod
 from mitmproxy import options, http
 from mitmproxy.tools import dump
@@ -51,14 +53,20 @@ class Collect:
         filecwdCurrInfo = f"{filecwdCurr}.info"
         if not path.exists(filecwd): makedirs(filecwd)
         with open(filecwdCurr, 'w+') as currf, open(filecwdMain, 'w+') as mainf, open(filecwdCurrInfo, 'w+') as infof:
-            content = flow.response.content.decode('utf-8')
+            content = flow.response.content
+            encodeCfg = chardet.detect(content)
+            if encodeCfg['confidence'] >= 0.8: content = content.decode(encodeCfg['encoding'])
             currf.write(content)
             mainf.write(content)
-            params = dict(flow.request.query)
+            params = mergeObj(
+                    dict(flow.request.query),
+                    dict(flow.request.urlencoded_form),
+                    { 'method': flow.request.method })
             try:
                 if flow.request.text: params.update(flow.request.json())
             except Exception as e:
-                logger.exception(e)
+                # logger.exception(e)
+                pass
             if url in self.superkey:
                 # 根据入参做文件映射
                 superkeyCfg = path.join(filecwd, 'config')
@@ -107,7 +115,10 @@ class Playback:
         self.closeList = closeList
         self.proxyList = proxyList
         self.superkey = superkey
-        self.headerList = ['Content-Type', 'Content-Encoding', 'Cache-Control']
+        self.headerList = [
+                'Content-Type', 'content-type',
+                'Content-Encoding', 'content-encoding',
+                'Cache-Control', 'cache-control']
 
     def getCollectPath(self, url):
         if len(self.collectList) == 0 or url in self.collectList: return url
@@ -143,11 +154,14 @@ class Playback:
             if url in self.superkey and path.exists(superkeyCfg):
                 # 根据入参做文件映射
                 skeys = self.superkey.get(url, [])
-                params = dict(flow.request.query)
+                params = mergeObj(
+                        dict(flow.request.query),
+                        dict(flow.request.urlencoded_form),
+                        { 'method': flow.request.method })
                 try:
                     if flow.request.text: params.update(flow.request.json())
                 except Exception as e:
-                    logger.exception(e)
+                    pass
                 key = '@@'.join([params[skey] for skey in skeys if type(params.get(skey)) == str])
                 with open(superkeyCfg, 'r+') as superf:
                     text = superf.read()
@@ -183,7 +197,9 @@ class Playback:
                     content = bytes(ff.read(), 'utf-8')
                     if content:
                         info = json.load(fi)
-                        fields = {key: val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                        fields = {key.lower(): val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                        if 'content-type' in fields:
+                            fields['content-type'] = re.sub(r'charset=[A-Za-z0-9-_]*\b', 'charset=UTF8', fields['content-type'])
                         flow.response = http.Response.make(200, content, { "sunday_flag": "proxy", **fields })
                         # if 'gzip' in fields['Content-Encoding']:
                         #     flow.response.encode('gzip')
