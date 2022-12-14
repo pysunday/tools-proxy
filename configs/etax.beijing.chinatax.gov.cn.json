@@ -1,16 +1,20 @@
 {
-  "superkey": {
-    "etax.hebei.chinatax.gov.cn/login-web/base/getXtcs.do": [
-      "paramCode"
-    ],
-    "etax.beijing.chinatax.gov.cn/sso/login": [
-      "method",
-      "sjly"
-    ]
-  },
   "proxyList": [
     "etax.beijing.chinatax.gov.cn/sso/auth/checkLoginState.do",
     "etax.beijing.chinatax.gov.cn/sso/login",
     "etax.beijing.chinatax.gov.cn/sso/base/captcha.do"
-  ]
+  ],
+  "setting": {
+    "etax.hebei.chinatax.gov.cn/login-web/base/getXtcs.do": {
+      "superkey": [
+        "paramCode"
+      ]
+    },
+    "etax.beijing.chinatax.gov.cn/sso/login": {
+      "superkey": [
+        "method",
+        "sjly"
+      ]
+    }
+  }
 }

@@ -1,0 +1,15 @@
+{
+  "setting": {
+    "etax.shandong.chinatax.gov.cn/EnterpriseDzswjLoginAction.do": {
+      "superkey": [
+        "method"
+      ]
+    },
+    "etax.shandong.chinatax.gov.cn/EnterpriseDzswjMainAction.do": {
+      "superkey": [
+        "activity",
+        "method"
+      ]
+    }
+  }
+}
