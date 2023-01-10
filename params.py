@@ -46,6 +46,13 @@ CMDINFO = {
                 'help': '数据目录',
                 'default': 'datas/default'
             },
+            {
+                'name': ['--log'],
+                'dest': 'isLog',
+                'help': '是否展示日志',
+                'default': False,
+                'action': 'store_true'
+            },
         ]
     }
 }

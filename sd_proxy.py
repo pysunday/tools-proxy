@@ -19,6 +19,8 @@ SundayException = getException()
 
 logger = Logger('TOOLS PROXY').getLogger()
 
+imageTypeList = ['png', 'gif', 'jpg', 'ico']
+
 class BytesEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, bytes):
@@ -79,45 +81,63 @@ class Collect(BaseClass):
         # info/main/format
         nowtime = datetime.today().isoformat()
         filecwdInfo = path.join(filecwd, 'info')
+        filecwdFormat = path.join(filecwd, 'format')
         filecwdMain = path.join(filecwd, 'main')
         filecwdCurr = path.join(filecwd, nowtime)
         filecwdCurrInfo = f"{filecwdCurr}.info"
         if not path.exists(filecwd): makedirs(filecwd)
-        with open(filecwdCurr, 'w+') as currf, open(filecwdMain, 'w+') as mainf, open(filecwdCurrInfo, 'w+') as infof:
-            content = flow.response.content
-            encodeCfg = chardet.detect(content)
-            if encodeCfg['confidence'] >= 0.8: content = content.decode(encodeCfg['encoding'])
-            currf.write(content)
-            mainf.write(content)
-            params = self.getParams(flow)
-            skeys = self.getSetting(url, 'superkey', None)
-            if skeys is not None:
-                # 根据入参做文件映射
-                superkeyCfg = path.join(filecwd, 'config')
-                key = '@@'.join([params[skey] for skey in skeys if type(params.get(skey)) == str])
-                obj = None
-                if not path.exists(superkeyCfg): open(superkeyCfg, 'a').close()
-                with open(superkeyCfg, 'r+') as superf:
-                    text = superf.read()
-                    if text:
-                        obj = json.loads(text)
-                        if key not in obj:
-                            obj[key] = nowtime
-                        else:
-                            obj = None
+        content = flow.response.content
+        try:
+            if url.split('.').pop() in imageTypeList:
+                with open(filecwdCurr, 'wb+') as currf, open(filecwdMain, 'wb+') as mainf:
+                    currf.write(content)
+                    mainf.write(content)
+            else:
+                encodeCfg = chardet.detect(content)
+                if encodeCfg['confidence'] >= 0.8:
+                    content = content.decode(encodeCfg['encoding'])
+                else:
+                    content = content.decode('utf-8')
+                with open(filecwdCurr, 'w+') as currf, open(filecwdMain, 'w+') as mainf:
+                    currf.write(content)
+                    mainf.write(content)
+        except Exception as e:
+            logger.error(f'{url}返回内容解析失败')
+            with open(filecwdCurr, 'wb+') as currf, open(filecwdMain, 'wb+') as mainf:
+                currf.write(content)
+                mainf.write(content)
+        params = self.getParams(flow)
+        skeys = self.getSetting(url, 'superkey', None)
+        if skeys is not None:
+            # 根据入参做文件映射
+            superkeyCfg = path.join(filecwd, 'config')
+            key = '@@'.join([params[skey] for skey in skeys if type(params.get(skey)) == str])
+            obj = None
+            if not path.exists(superkeyCfg): open(superkeyCfg, 'a').close()
+            with open(superkeyCfg, 'r+') as superf:
+                text = superf.read()
+                if text:
+                    obj = json.loads(text)
+                    if key not in obj:
+                        obj[key] = nowtime
                     else:
-                        obj = { key: nowtime }
-                if obj:
-                    with open(superkeyCfg, 'w+') as superf:
-                        superf.write(json.dumps(obj, indent=4))
-            info = {
-                    'url': url,
-                    'url_full': unquote(flow.request.url),
-                    'params': params,
-                    'request': flow.request.data.__dict__,
-                    'response': omit(flow.response.data.__dict__, ['content']),
-                    }
+                        obj = None
+                else:
+                    obj = { key: nowtime }
+            if obj:
+                with open(superkeyCfg, 'w+') as superf:
+                    superf.write(json.dumps(obj, indent=4))
+        info = {
+                'url': url,
+                'url_full': unquote(flow.request.url),
+                'params': params,
+                'request': flow.request.data.__dict__,
+                'response': omit(flow.response.data.__dict__, ['content']),
+                }
+        with open(filecwdCurrInfo, 'w+') as infof:
             infof.write(json.dumps(info, indent=4, cls=BytesEncoder))
+        if self.getSetting(url, 'format', None):
+            copyfile(filecwdCurr, filecwdFormat)
         if not path.exists(filecwdInfo):
             copyfile(filecwdCurrInfo, filecwdInfo)
         logger.info('文件写入成功!')
@@ -127,7 +147,10 @@ class Collect(BaseClass):
         if urlInfo.netloc: 
             url = grenPath(urlInfo)
             if len(self.collectList) == 0 or url in self.collectList:
-                self.parseData(urlInfo, flow)
+                try:
+                    self.parseData(urlInfo, flow)
+                except Exception as e:
+                    __import__('ipdb').set_trace()
 
 class Playback(BaseClass):
     def __init__(self, *args, **kwargs):
@@ -139,24 +162,46 @@ class Playback(BaseClass):
                 'Content-Type', 'content-type',
                 'Content-Encoding', 'content-encoding',
                 'Cache-Control', 'cache-control']
+        self.responseHandle = {}
 
     def getCollectPath(self, url):
         if len(self.collectList) == 0 or url in self.collectList: return url
         for coll in self.collectList:
-            if url.find(coll) + len(coll) == len(url):
+            if url.find(coll) > -1 and url.find(coll) + len(coll) == len(url):
                 return coll
         return False
+
+    def response(self, flow):
+        urlInfo = urlparse(flow.request.url)
+        url = grenPath(urlInfo)
+        if url not in self.responseHandle: return
+        filepath = self.responseHandle[url]
+        logger.info('本地: ' + filepath)
+        with open(filepath, 'r') as ff:
+            # content = bytes(ff.read(), 'utf-8')
+            content = ff.read()
+            if content:
+                jsonpKey = self.getSetting(url, 'jsonp')
+                if jsonpKey is not None:
+                    params = self.getParams(flow)
+                    content = re.sub(r'\b(.*?)\(', f'{params.get(jsonpKey, jsonpKey)}(', content, 1)
+                flow.response.headers.update({'sunday_flag': 'proxy'})
+                flow.response.content = bytes(content, 'utf-8')
 
     def request(self, flow):
         urlInfo = urlparse(flow.request.url)
         url = grenPath(urlInfo)
+        # if 'ac.dun.163.com/v2/config/js' == url: __import__('ipdb').set_trace()
         collectPath = self.getCollectPath(url)
         # logger.warning('链接: ' + url)
         # if url in self.closeList or url.split('.').pop() in ['png', 'gif']:
+        if not collectPath:
+            logger.debug('网络: ' + url)
+            return
         if self.checkUrlInclude(url, self.closeList):
             logger.error('拦截: ' + url)
             flow.response = http.Response.make(400, str.encode(''))
-        elif url.split('.').pop() in ['png', 'gif', 'jpg']:
+        elif url.split('.').pop() in imageTypeList:
             logger.info('图片: ' + url)
             mode = url.split('.').pop().lower()
             if mode == 'jpg': mode = 'jpeg'
@@ -164,7 +209,7 @@ class Playback(BaseClass):
             flow.response = http.Response.make(200, img_byte, {
                 'Content-Type': f'image/{mode}'
                 })
-        elif collectPath:
+        else:
             filepath = ''
             filepath_tmp = path.join(self.dataPath, collectPath)
             if path.isdir(filepath_tmp):
@@ -212,35 +257,37 @@ class Playback(BaseClass):
                 headers = dict(flow.request.headers)
                 targeturl = flow.request.url
                 res = getattr(self.fetch, flow.request.method.lower())(targeturl, data=data, headers=headers)
-                flow.response = http.Response.make(res.status_code, res.content, { **dict(res.headers), "sunday_flag": "7758" })
+                flow.response = http.Response.make(res.status_code, res.content, { **dict(res.headers), "sunday_flag": "proxy" })
             elif filepath:
+                if self.getSetting(url, 'response', None):
+                    self.responseHandle[url] = filepath
+                    return
                 logger.info('本地: ' + filepath)
-                with open(filepath, 'r') as ff, open(filepath_info, 'r') as fi:
-                    # content = bytes(ff.read(), 'utf-8')
-                    content = ff.read()
-                    if content:
-                        info = json.load(fi)
-                        jsonpKey = self.getSetting(url, 'jsonp')
-                        if jsonpKey is not None:
-                            params = self.getParams(flow)
-                            # startIdx = content.find('(')
-                            # if startIdx > -1:
-                            #     content = params.get(jsonpKey, jsonpKey) + content[startIdx:]
-                            content = re.sub(r'\b(.*?)\(', f'{params.get(jsonpKey, jsonpKey)}(', content, 1)
-                        fields = {key.lower(): val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
-                        status_code = get(info, 'response.status_code')
-                        if 'content-type' in fields:
-                            fields['content-type'] = re.sub(r'charset=[A-Za-z0-9-_]*\b', 'charset=UTF8', fields['content-type'])
-                        flow.response = http.Response.make(status_code, bytes(content, 'utf-8'), {
-                            "sunday_flag": "proxy",
-                            "Access-Control-Allow-Origin": "*",
-                            **fields })
-                        # if 'gzip' in fields['Content-Encoding']:
-                        #     flow.response.encode('gzip')
+                info = {}
+                content = ''
+                content_type = 'str'
+                try:
+                    with open(filepath, 'r') as ff: content = ff.read()
+                except Exception as e:
+                    content_type = 'bin'
+                    with open(filepath, 'rb') as ff: content = ff.read()
+                if content:
+                    with open(filepath_info, 'r') as fi: info = json.load(fi)
+                    jsonpKey = self.getSetting(url, 'jsonp')
+                    if jsonpKey is not None:
+                        params = self.getParams(flow)
+                        content = re.sub(r'\b(.*?)\(', f'{params.get(jsonpKey, jsonpKey)}(', content, 1)
+                    fields = {key.lower(): val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                    status_code = get(info, 'response.status_code')
+                    if 'content-type' in fields:
+                        fields['content-type'] = re.sub(r'charset=[A-Za-z0-9-_]*\b', 'charset=UTF8', fields['content-type'])
+                    if type(content) != bytes: content = bytes(content, 'utf-8')
+                    flow.response = http.Response.make(status_code, content, {
+                        "sunday_flag": "proxy",
+                        "Access-Control-Allow-Origin": "*",
+                        **fields })
             else:
                 logger.debug('网络: ' + url)
-        else:
-            logger.debug('网络: ' + url)
 
 class Proxy():
     def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, setting=None, **kwargs):
@@ -294,7 +341,7 @@ class Proxy():
         opts = options.Options(listen_host=self.host, listen_port=self.port)
         master = dump.DumpMaster(
             opts,
-            with_termlog=False,
+            with_termlog=self.isLog,
             with_dumper=False,
         )
         if self.name not in ['collect', 'playback']:
