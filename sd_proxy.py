@@ -290,7 +290,7 @@ class Playback(BaseClass):
                 logger.debug('网络: ' + url)
 
 class Proxy():
-    def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, setting=None, **kwargs):
+    def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, setting=None, isLog=False, **kwargs):
         self.name = name
         self.host = host
         self.port = int(port)
@@ -301,6 +301,7 @@ class Proxy():
         self.configFile = None
         self.dataPath = dataPath
         self.runpath = path.realpath(path.curdir)
+        self.isLog = isLog
 
     def addCloseUrl(self, url):
         if type(url) == str: url = [url]

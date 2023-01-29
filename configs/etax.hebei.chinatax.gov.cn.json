@@ -1,0 +1,14 @@
+{
+  "superkey": {
+    "etax.hebei.chinatax.gov.cn/login-web/base/getXtcs.do": [
+      "paramCode"
+    ],
+  },
+  "setting": {
+    "etax.hebei.chinatax.gov.cn/login-web/base/getXtcs.do": {
+      "superkey": [
+        "paramCode"
+      ]
+    },
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "setting": {
+    "etax.liaoning.chinatax.gov.cn/sword": {
+      "superkey": [
+        "header_method",
+        "ctrl"
+      ]
+    },
+    "etax.liaoning.chinatax.gov.cn:7631/sword": {
+      "superkey": [
+        "header_method",
+        "ctrl"
+      ]
+    },
+    "etax.liaoning.chinatax.gov.cn:7632/ajax.sword": {
+      "superkey": [
+        "header_method",
+        "ctrl"
+      ]
+    },
+    "etax.liaoning.chinatax.gov.cn/form.sword": {
+      "superkey": [
+        "header_method",
+        "ctrl",
+        "sName"
+      ]
+    },
+    "etax.liaoning.chinatax.gov.cn/ajax.sword": {
+      "superkey": [
+        "header_method",
+        "ctrl"
+      ]
+    },
+    "etax.liaoning.chinatax.gov.cn/download.sword": {
+      "superkey": [
+        "header_method",
+        "ctrl"
+      ]
+    }
+  }
+}
