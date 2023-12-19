@@ -2,6 +2,7 @@
 import asyncio
 import json
 import gzip
+import copy
 import re
 import chardet
 from sunday.core import Logger, Fetch, getException, getParser
@@ -36,12 +37,13 @@ def grenPath(urlInfo):
 
 
 class BaseClass:
-    def __init__(self, dataPath, collectList, closeList, proxyList, setting):
+    def __init__(self, dataPath, collectList, closeList, proxyList, setting, port):
         self.dataPath = dataPath
         self.collectList = collectList
         self.closeList = closeList
         self.proxyList = proxyList
         self.setting = setting
+        self.port = port
 
     def getSetting(self, url, key, defval=None):
         if url not in self.setting: return None
@@ -158,6 +160,11 @@ class Playback(BaseClass):
         logger.info(f'回放接口 => {self.dataPath}')
         self.fetch = Fetch()
         self.headerList = [
+                'Set-Cookie', 'set-cookie',
+                'Server', 'server',
+                'Cache-Control', 'cache-control',
+                'Pragma', 'pragma',
+                'Connection', 'connection',
                 'Location', 'location',
                 'Content-Type', 'content-type',
                 'Content-Encoding', 'content-encoding',
@@ -191,7 +198,6 @@ class Playback(BaseClass):
     def request(self, flow):
         urlInfo = urlparse(flow.request.url)
         url = grenPath(urlInfo)
-        # if 'ac.dun.163.com/v2/config/js' == url: __import__('ipdb').set_trace()
         collectPath = self.getCollectPath(url)
         # logger.warning('链接: ' + url)
         # if url in self.closeList or url.split('.').pop() in ['png', 'gif']:
@@ -213,7 +219,9 @@ class Playback(BaseClass):
             filepath = ''
             filepath_tmp = path.join(self.dataPath, collectPath)
             if path.isdir(filepath_tmp):
-                filepath_format = path.join(filepath_tmp, 'format')
+                filepath_format_none = path.join(filepath_tmp, 'format')
+                filepath_format_port = f'{filepath_format_none}-{self.port}'
+                filepath_format = filepath_format_port if path.exists(filepath_format_port) else filepath_format_none
                 filepath_main = path.join(filepath_tmp, 'main')
                 filepath_info = path.join(filepath_tmp, 'info')
             else:
@@ -277,17 +285,22 @@ class Playback(BaseClass):
                     if jsonpKey is not None:
                         params = self.getParams(flow)
                         content = re.sub(r'\b(.*?)\(', f'{params.get(jsonpKey, jsonpKey)}(', content, 1)
-                    fields = {key.lower(): val for key, val in get(info, 'response.headers.fields') if key in self.headerList}
+                    fields = [(key, self.fields_parse(key, val)) for key, val in copy.deepcopy(get(info, 'response.headers.fields')) if key in self.headerList]
+                    fields.extend([
+                        ("sunday_flag", "proxy"),
+                        ("Access-Control-Allow-Origin", "*"),
+                    ])
                     status_code = get(info, 'response.status_code')
-                    if 'content-type' in fields:
-                        fields['content-type'] = re.sub(r'charset=[A-Za-z0-9-_]*\b', 'charset=UTF8', fields['content-type'])
                     if type(content) != bytes: content = bytes(content, 'utf-8')
-                    flow.response = http.Response.make(status_code, content, {
-                        "sunday_flag": "proxy",
-                        "Access-Control-Allow-Origin": "*",
-                        **fields })
+                    flow.response = http.Response.make(status_code, content, [(bytes(key, 'utf-8'), bytes(val, 'utf-8')) for key, val in fields])
             else:
                 logger.debug('网络: ' + url)
+
+    def fields_parse(self, key, val):
+        if key in ['content_type', 'Content-Type']:
+            return re.sub(r'charset=[A-Za-z0-9-_]*\b', 'charset=UTF8', val)
+        return val
+
 
 class Proxy():
     def __init__(self, name='playback', host='0.0.0.0', port=7758, collectList=None, closeList=None, proxyList=None, dataPath=None, setting=None, isLog=False, **kwargs):
@@ -339,7 +352,10 @@ class Proxy():
         logger.info('拦截处理的链接有: %s' % self.closeList)
         logger.info('代理处理的链接有: %s' % self.proxyList)
         logger.info('特定链接强化配置: %s' % self.setting)
-        opts = options.Options(listen_host=self.host, listen_port=self.port)
+        opts = options.Options(
+            listen_host=self.host,
+            listen_port=self.port,
+        )
         master = dump.DumpMaster(
             opts,
             with_termlog=self.isLog,
@@ -349,7 +365,7 @@ class Proxy():
             raise SundayException(-1, '传入name值不正确，请检查')
         Addon = Collect if self.name == 'collect' else Playback
         master.addons.add(
-            Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList, self.setting),
+            Addon(path.join(self.runpath, self.dataPath), self.collectList, self.closeList, self.proxyList, self.setting, self.port),
             )
         await master.run()
 
